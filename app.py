@@ -142,15 +142,21 @@ def process_card(src_img, scale, is_front, mobile_no, aadhaar_no, vid_no, face_i
         tNewX, tNewY = int(tX - ((tNewW - tW) / 2) + (finalW * 0.06)), int(tY - ((tNewH - tH) / 2))
         final_card.paste(text_crop.resize((tNewW, tNewH), Image.Resampling.LANCZOS), (tNewX, tNewY))
         
-        # 🔥 AADHAAR & VID FIX (Perfect placement, clear old text) 🔥
+      # 🔥 AADHAAR & VID FIX (Perfect placement, clear old text) 🔥
         draw.rectangle([250, 480, finalW - 50, 595], fill="white") # Bada White Box
         centerOfCard = finalW / 2
         
         if aadhaar_no: 
-            draw.text((centerOfCard, 490), aadhaar_no, fill="black", font=font_aadhaar, anchor="mt")
-        if vid_no: 
-            draw.text((centerOfCard, 555), f"VID : {vid_no}", fill="black", font=font_vid, anchor="mt")
+            # anchor hata diya gaya hai, text_length() se center nikala hai
+            text_length = draw.textlength(aadhaar_no, font=font_aadhaar)
+            x_pos = centerOfCard - (text_length / 2)
+            draw.text((x_pos, 490), aadhaar_no, fill="black", font=font_aadhaar)
             
+        if vid_no: 
+            vid_text = f"VID : {vid_no}"
+            text_length = draw.textlength(vid_text, font=font_vid)
+            x_pos = centerOfCard - (text_length / 2)
+            draw.text((x_pos, 555), vid_text, fill="black", font=font_vid)
         # PHOTO PASTE
         pX, pY, pW, pH = 55, 140, 255, 300 
         draw.rectangle([pX-10, pY-10, pX+pW+10, pY+pH+10], fill="white") 
