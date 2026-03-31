@@ -43,7 +43,7 @@ async function sendToPythonServer() {
 
     try {
         // 🔥 UPDATE THIS URL WITH YOUR LIVE PYTHON SERVER URL 🔥
-        const pythonServerUrl = "https://YOUR_RENDER_URL_HERE/process_aadhaar"; 
+        const pythonServerUrl = "https://aadhar-pvc-tool.onrender.com/process_aadhaar"; 
         
         const response = await fetch(pythonServerUrl, {
             method: "POST",
