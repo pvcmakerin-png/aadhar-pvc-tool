@@ -142,18 +142,23 @@ def process_card(src_img, scale, is_front, mobile_no, aadhaar_no, vid_no, face_i
         tNewX, tNewY = int(tX - ((tNewW - tW) / 2) + (finalW * 0.06)), int(tY - ((tNewH - tH) / 2))
         final_card.paste(text_crop.resize((tNewW, tNewH), Image.Resampling.LANCZOS), (tNewX, tNewY))
         
-      # 🔥 AADHAAR & VID FIX (Perfect placement, clear old text) 🔥
+     # 🔥 AADHAAR & VID FIX (Perfect placement, clear old text) 🔥
         draw.rectangle([250, 480, finalW - 50, 595], fill="white") # Bada White Box
         centerOfCard = finalW / 2
         
         if aadhaar_no: 
-            # anchor hata diya gaya hai, text_length() se center nikala hai
-            text_length = draw.textlength(aadhaar_no, font=font_aadhaar)
+            # छुपे हुए Newlines (\n) को हटाकर सिंगल स्पेस में बदलना
+            clean_aadhaar = " ".join(aadhaar_no.split())
+            
+            text_length = draw.textlength(clean_aadhaar, font=font_aadhaar)
             x_pos = centerOfCard - (text_length / 2)
-            draw.text((x_pos, 490), aadhaar_no, fill="black", font=font_aadhaar)
+            draw.text((x_pos, 490), clean_aadhaar, fill="black", font=font_aadhaar)
             
         if vid_no: 
-            vid_text = f"VID : {vid_no}"
+            # छुपे हुए Newlines (\n) को हटाकर सिंगल स्पेस में बदलना
+            clean_vid = " ".join(vid_no.split())
+            
+            vid_text = f"VID : {clean_vid}"
             text_length = draw.textlength(vid_text, font=font_vid)
             x_pos = centerOfCard - (text_length / 2)
             draw.text((x_pos, 555), vid_text, fill="black", font=font_vid)
