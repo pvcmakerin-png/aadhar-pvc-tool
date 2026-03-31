@@ -122,9 +122,9 @@ def process_card(src_img, scale, is_front, mobile_no, aadhaar_no, vid_no, face_i
     
     # 🔥 FONT LOADING 🔥
     try:
-        font_vid = ImageFont.truetype(FONT_PATH, 24)
-        font_aadhaar = ImageFont.truetype(FONT_PATH, 55) # Bada Aadhaar Font
-        font_mob = ImageFont.truetype(FONT_PATH, 34) # Bada Mobile Font
+        font_vid = ImageFont.truetype(FONT_PATH, 28)
+        font_aadhaar = ImageFont.truetype(FONT_PATH, 45) # Bada Aadhaar Font
+        font_mob = ImageFont.truetype(FONT_PATH, 31) # Bada Mobile Font
     except IOError:
         font_vid = font_aadhaar = font_mob = ImageFont.load_default()
 
