@@ -11,17 +11,15 @@ import urllib.request
 app = Flask(__name__)
 CORS(app) 
 
-# =====================================================================
-# 🔥 FONT DOWNLOADER FOR RENDER SERVER (Solves Tiny Text Issue) 🔥
-# =====================================================================
-FONT_PATH = "/tmp/Roboto-Bold.ttf"
+# 🔥 FONT DOWNLOADER FOR TIMES NEW ROMAN BOLD 🔥
+FONT_PATH = "/tmp/timesbd.ttf" # timesbd.ttf = Times New Roman Bold
 if not os.path.exists(FONT_PATH):
     try:
-        # Google Fonts se direct bold font download karega server pe
-        urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf", FONT_PATH)
+        # Times New Roman Bold ki direct TTF file download karein
+        font_url = "https://github.com/mrbvrz/segoe-ui-linux/raw/master/font/timesbd.ttf" 
+        urllib.request.urlretrieve(font_url, FONT_PATH)
     except Exception as e:
-        print("Font download failed:", e)
-
+        print("Times New Roman font download failed:", e)
 # =====================================================================
 # SMART SCANNER: PDF के अंदर से Photo और QR को ढूँढना
 # =====================================================================
