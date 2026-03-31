@@ -5,19 +5,30 @@ from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageChops
 import re
 import io
 import base64
-import numpy as np
+import os
+import urllib.request
 
 app = Flask(__name__)
 CORS(app) 
 
 # =====================================================================
-# 🧠 SMART SCANNER: PDF के अंदर से Photo और QR को डायनामिक तरीके से ढूँढना
+# 🔥 FONT DOWNLOADER FOR RENDER SERVER (Solves Tiny Text Issue) 🔥
+# =====================================================================
+FONT_PATH = "/tmp/Roboto-Bold.ttf"
+if not os.path.exists(FONT_PATH):
+    try:
+        # Google Fonts se direct bold font download karega server pe
+        urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf", FONT_PATH)
+    except Exception as e:
+        print("Font download failed:", e)
+
+# =====================================================================
+# SMART SCANNER: PDF के अंदर से Photo और QR को ढूँढना
 # =====================================================================
 def extract_dynamic_assets(doc):
     face_img = None
     qr_img = None
     
-    # पूरे PDF के हर पेज और हर छुपी हुई इमेज को स्कैन करें
     for page_num in range(len(doc)):
         page = doc[page_num]
         image_list = page.get_images(full=True)
@@ -31,17 +42,14 @@ def extract_dynamic_assets(doc):
             w, h = img.size
             aspect_ratio = w / h
             
-            # 1. QR Code की पहचान: QR हमेशा चौकोर (Square) होता है (Aspect Ratio ~ 1.0)
+            # QR Code
             if 0.95 <= aspect_ratio <= 1.05 and w > 100:
                 qr_img = img
-                
-            # 2. Face (चेहरे) की पहचान: फोटो हमेशा लंबी (Portrait) होती है (Aspect Ratio ~ 0.75)
+            # Face
             elif 0.65 <= aspect_ratio <= 0.85 and w > 50:
                 face_img = img
                 
     return face_img, qr_img
-
-# =====================================================================
 
 def transparent_white_color(img_pil):
     img = img_pil.convert("RGBA")
@@ -57,6 +65,13 @@ def transparent_white_color(img_pil):
 
 def process_card(src_img, scale, is_front, mobile_no, aadhaar_no, vid_no, face_img, qr_img):
     finalW, finalH = 1016, 638
+    
+    # 🔥 BACKGROUND FIX: Remove blackish/greyish tint (Make it pure white) 🔥
+    enhancer = ImageEnhance.Brightness(src_img)
+    src_img = enhancer.enhance(1.2) # Brightness badhai
+    enhancer_contrast = ImageEnhance.Contrast(src_img)
+    src_img = enhancer_contrast.enhance(1.1) # Contrast badhaya taaki background white ho jaye
+    
     final_card = Image.new("RGB", (finalW, finalH), "white")
     
     draw_src = ImageDraw.Draw(src_img)
@@ -66,16 +81,16 @@ def process_card(src_img, scale, is_front, mobile_no, aadhaar_no, vid_no, face_i
     bg_resized = src_img.resize((finalW, finalH), Image.Resampling.LANCZOS)
     final_card = ImageChops.multiply(final_card, bg_resized)
     
-    # Darkness booster
+    # Darkness booster (Thoda sa light kar diya taaki ganda na lage)
     dark_overlay = Image.new("RGB", (finalW, finalH), "white")
     dark_draw = ImageDraw.Draw(dark_overlay)
     if is_front:
-        dark_draw.rectangle([310, 200, finalW, finalH - 170], fill=(220, 220, 220)) 
-        dark_draw.rectangle([320, 140, finalW - 500 + 320, 140 + 170], fill=(220, 220, 220))
-        dark_draw.rectangle([180, 10, finalW - 415 + 180, finalH - 510 + 10], fill=(220, 220, 220))
+        dark_draw.rectangle([310, 200, finalW, finalH - 170], fill=(235, 235, 235)) 
+        dark_draw.rectangle([320, 140, finalW - 500 + 320, 140 + 170], fill=(235, 235, 235))
+        dark_draw.rectangle([180, 10, finalW - 415 + 180, finalH - 510 + 10], fill=(235, 235, 235))
     else:
-        dark_draw.rectangle([15, 150, finalW - 420 + 15, finalH - 150 + 150], fill=(220, 220, 220))
-        dark_draw.rectangle([180, 10, finalW - 415 + 180, finalH - 510 + 10], fill=(220, 220, 220))
+        dark_draw.rectangle([15, 150, finalW - 420 + 15, finalH - 150 + 150], fill=(235, 235, 235))
+        dark_draw.rectangle([180, 10, finalW - 415 + 180, finalH - 510 + 10], fill=(235, 235, 235))
     final_card = ImageChops.multiply(final_card, dark_overlay)
 
     # Logos (Emblem & Aadhaar Logo)
@@ -106,43 +121,44 @@ def process_card(src_img, scale, is_front, mobile_no, aadhaar_no, vid_no, face_i
     final_card.paste(ashok_trans, (aNewX, aNewY), ashok_trans)
 
     draw = ImageDraw.Draw(final_card)
+    
+    # 🔥 FONT LOADING 🔥
     try:
-        font_vid = ImageFont.truetype("arialbd.ttf", 21)
-        font_aadhaar = ImageFont.truetype("arialbd.ttf", 44)
-        font_mob = ImageFont.truetype("arialbd.ttf", 36)
+        font_vid = ImageFont.truetype(FONT_PATH, 24)
+        font_aadhaar = ImageFont.truetype(FONT_PATH, 55) # Bada Aadhaar Font
+        font_mob = ImageFont.truetype(FONT_PATH, 34) # Bada Mobile Font
     except IOError:
         font_vid = font_aadhaar = font_mob = ImageFont.load_default()
 
     # =========================================================
-    # FRONT SIDE FIXES (Dynamically found Face + Text)
+    # FRONT SIDE FIXES
     # =========================================================
     if is_front:
-        # Text Zoomer
+        # Top Address Text Zoomer
         tX, tY, tW, tH = 320, 150, 500, 150
         text_crop = final_card.crop((tX, tY, tX+tW, tY+tH))
         draw.rectangle([tX, tY, tX+tW, tY+tH], fill="white")
         tNewW, tNewH = int(tW * 1.25), int(tH * 1.25)
         tNewX, tNewY = int(tX - ((tNewW - tW) / 2) + (finalW * 0.06)), int(tY - ((tNewH - tH) / 2))
-        text_crop = text_crop.resize((tNewW, tNewH), Image.Resampling.LANCZOS)
-        final_card.paste(text_crop, (tNewX, tNewY))
+        final_card.paste(text_crop.resize((tNewW, tNewH), Image.Resampling.LANCZOS), (tNewX, tNewY))
         
-        # Center Text (Aadhaar & VID)
-        draw.rectangle([300, 530, finalW - 33, 530 + 45], fill="white")
+        # 🔥 AADHAAR & VID FIX (Perfect placement, clear old text) 🔥
+        draw.rectangle([250, 480, finalW - 50, 595], fill="white") # Bada White Box
         centerOfCard = finalW / 2
-        if vid_no: draw.text((centerOfCard, 568), f"VID : {vid_no}", fill="black", font=font_vid, anchor="ms")
-        if aadhaar_no: draw.text((centerOfCard, 542), aadhaar_no, fill="black", font=font_aadhaar, anchor="ms")
+        
+        if aadhaar_no: 
+            draw.text((centerOfCard, 490), aadhaar_no, fill="black", font=font_aadhaar, anchor="mt")
+        if vid_no: 
+            draw.text((centerOfCard, 555), f"VID : {vid_no}", fill="black", font=font_vid, anchor="mt")
             
-        # 🔥 SMART PHOTO PASTE (At fixed coordinates) 🔥
-        pX, pY, pW, pH = 55, 140, 255, 300 # FIX PASTE LOCATION
-        draw.rectangle([pX-10, pY-10, pX+pW+10, pY+pH+10], fill="white") # Clean old area
+        # PHOTO PASTE
+        pX, pY, pW, pH = 55, 140, 255, 300 
+        draw.rectangle([pX-10, pY-10, pX+pW+10, pY+pH+10], fill="white") 
         
         if face_img:
-            # Increase Brightness by 30%
             enhancer = ImageEnhance.Brightness(face_img)
             bright_face = enhancer.enhance(1.3)
-            # Resize and Paste at fixed spot
-            resized_face = bright_face.resize((pW, pH), Image.Resampling.LANCZOS)
-            final_card.paste(resized_face, (pX, pY))
+            final_card.paste(bright_face.resize((pW, pH), Image.Resampling.LANCZOS), (pX, pY))
             draw.rectangle([pX, pY, pX+pW, pY+pH], outline="black", width=3)
         
         # Red Box Fix
@@ -152,19 +168,25 @@ def process_card(src_img, scale, is_front, mobile_no, aadhaar_no, vid_no, face_i
         draw.rectangle([boxX, boxY, boxX+boxW, boxY+cutH], fill="white")
         final_card.paste(box_crop.resize((pasteW, pasteH), Image.Resampling.LANCZOS), (boxX, boxY + 68))
         
+        # Mobile Number Print Fix
         if mobile_no and len(mobile_no) == 10:
-            draw.text((337, 366), f"Mob: {mobile_no}", fill="black", font=font_mob)
+            draw.rectangle([330, 340, 600, 390], fill="white") # Clear space for mobile
+            draw.text((337, 345), f"Mob: {mobile_no}", fill="black", font=font_mob)
 
     # =========================================================
-    # BACK SIDE FIXES (Dynamically found QR)
+    # BACK SIDE FIXES
     # =========================================================
     if not is_front:
-        # 🔥 SMART QR PASTE (At fixed coordinates) 🔥
-        qX, qY, qW, qH = 650, 150, 330, 330 # FIX PASTE LOCATION
-        draw.rectangle([qX-20, qY-20, qX+qW+20, qY+qH+20], fill="white") # Clean old area
+        # 🔥 QR CODE FIX (Remove border by cropping) 🔥
+        qX, qY, qW, qH = 650, 150, 330, 330 
+        draw.rectangle([qX-20, qY-20, qX+qW+20, qY+qH+20], fill="white") 
         
         if qr_img:
-            resized_qr = qr_img.resize((qW, qH), Image.Resampling.NEAREST) # Nearest keeps QR sharp
+            # Crop 4 pixels from edges to remove black lines
+            qw_orig, qh_orig = qr_img.size
+            qr_cropped = qr_img.crop((4, 4, qw_orig-4, qh_orig-4))
+            
+            resized_qr = qr_cropped.resize((qW, qH), Image.Resampling.NEAREST) 
             final_card.paste(resized_qr, (qX, qY))
 
     draw.rectangle([0, 0, finalW-1, finalH-1], outline="#333", width=1)
@@ -194,10 +216,8 @@ def process_aadhaar():
                 
         page = doc[0]
         
-        # 1. SMART SCAN: Extract Face & QR directly from PDF embedded assets
         face_img, qr_img = extract_dynamic_assets(doc)
         
-        # 2. Text Extraction
         full_text = page.get_text()
         foundMobile, foundAadhaar, foundVID = "", "", ""
         
@@ -211,7 +231,6 @@ def process_aadhaar():
         vid_match = re.search(r'[0-9]{4}\s[0-9]{4}\s[0-9]{4}\s[0-9]{4}', full_text)
         if vid_match: foundVID = vid_match.group()
 
-        # 3. Base Render
         scale = 3
         zoom_matrix = fitz.Matrix(scale, scale)
         pix = page.get_pixmap(matrix=zoom_matrix)
@@ -220,11 +239,9 @@ def process_aadhaar():
         pdfH = pdf_img.height
         cropY, cropH, cropW = int(pdfH - (228 * scale)), int(174 * scale), int(246 * scale)
         
-        # Get base templates
         front_src = pdf_img.crop((int(52 * scale), cropY, int(52 * scale)+cropW, cropY+cropH))
         back_src = pdf_img.crop((int(318 * scale), cropY, int(318 * scale)+cropW, cropY+cropH))
         
-        # Process and assemble dynamically
         front_final = process_card(front_src, scale, True, foundMobile, foundAadhaar, foundVID, face_img, qr_img)
         back_final = process_card(back_src, scale, False, "", "", "", face_img, qr_img)
         
