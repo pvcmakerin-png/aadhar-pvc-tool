@@ -8,16 +8,46 @@ import base64
 import numpy as np
 
 app = Flask(__name__)
-# CORS allow karta hai aapki website ko is Python server se baat karne ke liye
 CORS(app) 
 
+# =====================================================================
+# 🧠 SMART SCANNER: PDF के अंदर से Photo और QR को डायनामिक तरीके से ढूँढना
+# =====================================================================
+def extract_dynamic_assets(doc):
+    face_img = None
+    qr_img = None
+    
+    # पूरे PDF के हर पेज और हर छुपी हुई इमेज को स्कैन करें
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        image_list = page.get_images(full=True)
+        
+        for img_info in image_list:
+            xref = img_info[0]
+            base_image = doc.extract_image(xref)
+            image_bytes = base_image["image"]
+            img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            
+            w, h = img.size
+            aspect_ratio = w / h
+            
+            # 1. QR Code की पहचान: QR हमेशा चौकोर (Square) होता है (Aspect Ratio ~ 1.0)
+            if 0.95 <= aspect_ratio <= 1.05 and w > 100:
+                qr_img = img
+                
+            # 2. Face (चेहरे) की पहचान: फोटो हमेशा लंबी (Portrait) होती है (Aspect Ratio ~ 0.75)
+            elif 0.65 <= aspect_ratio <= 0.85 and w > 50:
+                face_img = img
+                
+    return face_img, qr_img
+
+# =====================================================================
+
 def transparent_white_color(img_pil):
-    """Converts white-ish background to transparent (Used for Logo & Ashok Chakra)"""
     img = img_pil.convert("RGBA")
     datas = img.getdata()
     newData = []
     for item in datas:
-        # If r > 180, g > 180, b > 180 make transparent
         if item[0] > 180 and item[1] > 180 and item[2] > 180:
             newData.append((255, 255, 255, 0))
         else:
@@ -25,153 +55,119 @@ def transparent_white_color(img_pil):
     img.putdata(newData)
     return img
 
-def process_card(src_img, scale, is_front, mobile_no, aadhaar_no, vid_no):
+def process_card(src_img, scale, is_front, mobile_no, aadhaar_no, vid_no, face_img, qr_img):
     finalW, finalH = 1016, 638
-    
-    # Create clean white card base
     final_card = Image.new("RGB", (finalW, finalH), "white")
     
-    # Erase Header and Footer (white out)
     draw_src = ImageDraw.Draw(src_img)
     draw_src.rectangle([0, 0, src_img.width, 11 * scale], fill="white")
     draw_src.rectangle([0, src_img.height - (7 * scale), src_img.width, src_img.height], fill="white")
     
-    # Multiply Blend logic (Darkening base text)
     bg_resized = src_img.resize((finalW, finalH), Image.Resampling.LANCZOS)
     final_card = ImageChops.multiply(final_card, bg_resized)
     
-    # Darkness booster boxes (Python overlay)
+    # Darkness booster
     dark_overlay = Image.new("RGB", (finalW, finalH), "white")
     dark_draw = ImageDraw.Draw(dark_overlay)
-    
     if is_front:
         dark_draw.rectangle([310, 200, finalW, finalH - 170], fill=(220, 220, 220)) 
         dark_draw.rectangle([320, 140, finalW - 500 + 320, 140 + 170], fill=(220, 220, 220))
         dark_draw.rectangle([180, 10, finalW - 415 + 180, finalH - 510 + 10], fill=(220, 220, 220))
     else:
-        # BACK SIDE: Darkness extended downwards
         dark_draw.rectangle([15, 150, finalW - 420 + 15, finalH - 150 + 150], fill=(220, 220, 220))
         dark_draw.rectangle([180, 10, finalW - 415 + 180, finalH - 510 + 10], fill=(220, 220, 220))
-        
     final_card = ImageChops.multiply(final_card, dark_overlay)
 
-    # =========================================================
-    #  AADHAAR LOGO (Transparent, Zoom, Shift)
-    # =========================================================
+    # Logos (Emblem & Aadhaar Logo)
     lX, lY, lW, lH = 805, 20, 200, 110
     logo_crop = final_card.crop((lX, lY, lX+lW, lY+lH))
     logo_trans = transparent_white_color(logo_crop)
-    
-    # Whitewash original logo area
     ImageDraw.Draw(final_card).rectangle([lX, lY, lX+lW, lY+lH], fill="white")
     
     if is_front:
-        lZoom, shiftLeft, heightMult = 1.45, finalW * 0.04, 1.08
-        shiftUpAmount = 0
+        lNewW, lNewH = int(lW * 1.45), int((lH * 1.45) * 1.08)
+        lNewX, lNewY = int((lX - ((lNewW - lW) / 2)) - (finalW * 0.04)), int((lY - ((lNewH - lH) / 2)))
     else:
-        lZoom, shiftLeft, heightMult = 1.30, finalW * 0.02, 1.05
-        shiftUpAmount = finalH * 0.03
-        
-    lNewW = int(lW * lZoom)
-    lNewH = int((lH * lZoom) * heightMult)
-    lNewX = int((lX - ((lNewW - lW) / 2)) - shiftLeft)
-    lNewY = int((lY - ((lNewH - lH) / 2)) - shiftUpAmount)
+        lNewW, lNewH = int(lW * 1.30), int((lH * 1.30) * 1.05)
+        lNewX, lNewY = int((lX - ((lNewW - lW) / 2)) - (finalW * 0.02)), int((lY - ((lNewH - lH) / 2)) - (finalH * 0.03))
     
     logo_trans = logo_trans.resize((lNewW, lNewH), Image.Resampling.LANCZOS)
     final_card.paste(logo_trans, (lNewX, lNewY), logo_trans) 
 
-    # =========================================================
-    # ASHOK CHAKRA (Transparent, Zoom, Shift)
-    # =========================================================
     aX, aY, aW, aH = (30 if is_front else 10), 20, 130, 110
     ashok_crop = final_card.crop((aX, aY, aX+aW, aY+aH))
     ashok_trans = transparent_white_color(ashok_crop)
-    
     ImageDraw.Draw(final_card).rectangle([aX, aY, aX+aW, aY+aH], fill="white")
     
-    aZoom = 1.25
-    aShiftRight = finalW * 0.04 if is_front else finalW * 0.02
-    aShiftUp = 0 if is_front else finalH * 0.01
-    
-    aNewW, aNewH = int(aW * aZoom), int(aH * aZoom)
-    aNewX = int((30 - ((aNewW - aW) / 2)) + aShiftRight)
-    aNewY = int((aY - ((aNewH - aH) / 2)) - aShiftUp)
-    
+    aNewW, aNewH = int(aW * 1.25), int(aH * 1.25)
+    aNewX = int((30 - ((aNewW - aW) / 2)) + (finalW * 0.04 if is_front else finalW * 0.02))
+    aNewY = int((aY - ((aNewH - aH) / 2)) - (0 if is_front else finalH * 0.01))
     ashok_trans = ashok_trans.resize((aNewW, aNewH), Image.Resampling.LANCZOS)
     final_card.paste(ashok_trans, (aNewX, aNewY), ashok_trans)
 
-    # =========================================================
-    # FRONT SPECIFIC LOGIC (Photo Brightness, Text Replacements)
-    # =========================================================
     draw = ImageDraw.Draw(final_card)
     try:
-        # Standard Font (Fallback to default if arial is missing)
         font_vid = ImageFont.truetype("arialbd.ttf", 21)
         font_aadhaar = ImageFont.truetype("arialbd.ttf", 44)
         font_mob = ImageFont.truetype("arialbd.ttf", 36)
     except IOError:
         font_vid = font_aadhaar = font_mob = ImageFont.load_default()
 
+    # =========================================================
+    # FRONT SIDE FIXES (Dynamically found Face + Text)
+    # =========================================================
     if is_front:
         # Text Zoomer
         tX, tY, tW, tH = 320, 150, 500, 150
         text_crop = final_card.crop((tX, tY, tX+tW, tY+tH))
         draw.rectangle([tX, tY, tX+tW, tY+tH], fill="white")
-        
-        tZoom, tShiftRight = 1.25, finalW * 0.06
-        tNewW, tNewH = int(tW * tZoom), int(tH * tZoom)
-        tNewX = int(tX - ((tNewW - tW) / 2) + tShiftRight)
-        tNewY = int(tY - ((tNewH - tH) / 2))
-        
+        tNewW, tNewH = int(tW * 1.25), int(tH * 1.25)
+        tNewX, tNewY = int(tX - ((tNewW - tW) / 2) + (finalW * 0.06)), int(tY - ((tNewH - tH) / 2))
         text_crop = text_crop.resize((tNewW, tNewH), Image.Resampling.LANCZOS)
         final_card.paste(text_crop, (tNewX, tNewY))
         
-        # Replace Aadhaar Number Logic (Centered)
+        # Center Text (Aadhaar & VID)
         draw.rectangle([300, 530, finalW - 33, 530 + 45], fill="white")
         centerOfCard = finalW / 2
-        
-        if vid_no:
-            draw.text((centerOfCard, 568), f"VID : {vid_no}", fill="black", font=font_vid, anchor="ms")
-        if aadhaar_no:
-            draw.text((centerOfCard, 542), aadhaar_no, fill="black", font=font_aadhaar, anchor="ms")
+        if vid_no: draw.text((centerOfCard, 568), f"VID : {vid_no}", fill="black", font=font_vid, anchor="ms")
+        if aadhaar_no: draw.text((centerOfCard, 542), aadhaar_no, fill="black", font=font_aadhaar, anchor="ms")
             
-        # 🔥 PHOTO ZOOMER & BRIGHTNESS LOGIC (30% Extra Light) 🔥
-        pX, pY, pW, pH = 85, 160, 212, 230
-        photo_crop = final_card.crop((pX, pY, pX+pW, pY+pH))
+        # 🔥 SMART PHOTO PASTE (At fixed coordinates) 🔥
+        pX, pY, pW, pH = 55, 140, 255, 300 # FIX PASTE LOCATION
+        draw.rectangle([pX-10, pY-10, pX+pW+10, pY+pH+10], fill="white") # Clean old area
         
-        enhancer = ImageEnhance.Brightness(photo_crop)
-        photo_crop = enhancer.enhance(1.3) # 30% Brightness increase BEFORE paste
+        if face_img:
+            # Increase Brightness by 30%
+            enhancer = ImageEnhance.Brightness(face_img)
+            bright_face = enhancer.enhance(1.3)
+            # Resize and Paste at fixed spot
+            resized_face = bright_face.resize((pW, pH), Image.Resampling.LANCZOS)
+            final_card.paste(resized_face, (pX, pY))
+            draw.rectangle([pX, pY, pX+pW, pY+pH], outline="black", width=3)
         
-        draw.rectangle([pX, pY, pX+pW, pY+pH], fill="white")
-        
-        pZoom = 1.20
-        pNewW, pNewH = int(pW * pZoom), int(pH * pZoom)
-        pNewX = int(pX - ((pNewW - pW) / 1.50))
-        pNewY = int(pY - ((pNewH - pH) / 16))
-        
-        photo_crop = photo_crop.resize((pNewW, pNewH), Image.Resampling.LANCZOS)
-        final_card.paste(photo_crop, (pNewX, pNewY))
-        draw.rectangle([pNewX, pNewY, pNewX+pNewW, pNewY+pNewH], outline="black", width=3)
-        
-        # RED BOX RESIZER
-        boxX, boxY = 333, 320
-        cutH, boxW = 190, finalW - boxX
+        # Red Box Fix
+        boxX, boxY, cutH, boxW = 333, 320, 190, finalW - 333
         pasteH, pasteW = 120, int(boxW * 0.93)
-        
         box_crop = final_card.crop((boxX, boxY, boxX+boxW, boxY+cutH))
         draw.rectangle([boxX, boxY, boxX+boxW, boxY+cutH], fill="white")
+        final_card.paste(box_crop.resize((pasteW, pasteH), Image.Resampling.LANCZOS), (boxX, boxY + 68))
         
-        newY = boxY + 68
-        box_crop = box_crop.resize((pasteW, pasteH), Image.Resampling.LANCZOS)
-        final_card.paste(box_crop, (boxX, newY))
-        
-        # Mobile Number Print
         if mobile_no and len(mobile_no) == 10:
             draw.text((337, 366), f"Mob: {mobile_no}", fill="black", font=font_mob)
 
-    # Border around card
+    # =========================================================
+    # BACK SIDE FIXES (Dynamically found QR)
+    # =========================================================
+    if not is_front:
+        # 🔥 SMART QR PASTE (At fixed coordinates) 🔥
+        qX, qY, qW, qH = 650, 150, 330, 330 # FIX PASTE LOCATION
+        draw.rectangle([qX-20, qY-20, qX+qW+20, qY+qH+20], fill="white") # Clean old area
+        
+        if qr_img:
+            resized_qr = qr_img.resize((qW, qH), Image.Resampling.NEAREST) # Nearest keeps QR sharp
+            final_card.paste(resized_qr, (qX, qY))
+
     draw.rectangle([0, 0, finalW-1, finalH-1], outline="#333", width=1)
-    
     return final_card
 
 def pil_to_base64(img):
@@ -189,7 +185,6 @@ def process_aadhaar():
     auto_mobile = request.form.get('autoMobile', 'no') == 'yes'
     
     try:
-        # Load PDF
         pdf_bytes = pdf_file.read()
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         
@@ -199,11 +194,12 @@ def process_aadhaar():
                 
         page = doc[0]
         
-        # 1. Text Extraction
+        # 1. SMART SCAN: Extract Face & QR directly from PDF embedded assets
+        face_img, qr_img = extract_dynamic_assets(doc)
+        
+        # 2. Text Extraction
         full_text = page.get_text()
-        foundMobile = ""
-        foundAadhaar = ""
-        foundVID = ""
+        foundMobile, foundAadhaar, foundVID = "", "", ""
         
         if auto_mobile:
             mob_match = re.search(r'[6-9][0-9]{9}', full_text)
@@ -215,26 +211,22 @@ def process_aadhaar():
         vid_match = re.search(r'[0-9]{4}\s[0-9]{4}\s[0-9]{4}\s[0-9]{4}', full_text)
         if vid_match: foundVID = vid_match.group()
 
-        # 2. Render Page to Image (Scale = 3)
+        # 3. Base Render
         scale = 3
         zoom_matrix = fitz.Matrix(scale, scale)
         pix = page.get_pixmap(matrix=zoom_matrix)
         pdf_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         
         pdfH = pdf_img.height
-        cropY = int(pdfH - (228 * scale))
-        cropH = int(174 * scale)
-        cropW = int(246 * scale)
-        frontX = int(52 * scale)
-        backX = int(318 * scale)
+        cropY, cropH, cropW = int(pdfH - (228 * scale)), int(174 * scale), int(246 * scale)
         
-        # Crop Front & Back
-        front_src = pdf_img.crop((frontX, cropY, frontX+cropW, cropY+cropH))
-        back_src = pdf_img.crop((backX, cropY, backX+cropW, cropY+cropH))
+        # Get base templates
+        front_src = pdf_img.crop((int(52 * scale), cropY, int(52 * scale)+cropW, cropY+cropH))
+        back_src = pdf_img.crop((int(318 * scale), cropY, int(318 * scale)+cropW, cropY+cropH))
         
-        # Process Images
-        front_final = process_card(front_src, scale, True, foundMobile, foundAadhaar, foundVID)
-        back_final = process_card(back_src, scale, False, "", "", "")
+        # Process and assemble dynamically
+        front_final = process_card(front_src, scale, True, foundMobile, foundAadhaar, foundVID, face_img, qr_img)
+        back_final = process_card(back_src, scale, False, "", "", "", face_img, qr_img)
         
         return jsonify({
             "front_image": pil_to_base64(front_final),
@@ -242,6 +234,8 @@ def process_aadhaar():
         })
 
     except Exception as e:
+        import traceback
+        print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
